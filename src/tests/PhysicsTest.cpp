@@ -10,7 +10,11 @@
 
 #include "esp/assets/ResourceManager.h"
 #include "esp/gfx/Renderer.h"
+
+#ifdef ESP_BUILD_WITH_BULLET
 #include "esp/physics/bullet/BulletPhysicsManager.h"
+#endif
+
 #include "esp/scene/SceneManager.h"
 
 #include "configure.h"

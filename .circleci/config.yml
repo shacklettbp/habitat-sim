@@ -332,6 +332,7 @@ jobs:
 
               export PYTHONPATH=$PYTHONPATH:$(pwd)
               # run tests with code coverage
+              CORRADE_TEST_COLOR=ON GTEST_COLOR=yes ./build.sh --headless --with-cuda --run-tests
               CORRADE_TEST_COLOR=ON GTEST_COLOR=yes ./build.sh --headless --bullet --with-cuda --run-tests --cmake-args='-DCMAKE_CXX_FLAGS="--coverage"'
 
               while [ ! -f ~/miniconda/pytorch_installed ]; do sleep 2; done # wait for Pytorch
