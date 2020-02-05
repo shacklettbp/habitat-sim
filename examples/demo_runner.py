@@ -30,6 +30,7 @@ _barrier = None
 class DemoRunnerType(Enum):
     BENCHMARK = 1
     EXAMPLE = 2
+    AB_TESTS_CULLING = 3
 
 
 class DemoRunner:
