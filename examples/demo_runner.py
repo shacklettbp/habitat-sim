@@ -206,6 +206,7 @@ class DemoRunner:
         while total_frames < self._sim_settings["max_frames"]:
             if total_frames == 1:
                 start_time = time.time()
+            # XXX
             action = random.choice(action_names)
             if not self._sim_settings["silent"]:
                 print("action", action)
