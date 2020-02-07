@@ -108,10 +108,11 @@ elif args.string:
     if "control_value" in args:
         control_val = args.control_value
 
+default_settings = dr.default_sim_settings.copy()
+
 if not (args.feature in default_settings.keys()):
     raise RuntimeError("Feature to be tested is not defined in default_sim_settings.")
 
-default_settings = dr.default_sim_settings.copy()
 default_settings["scene"] = args.scene
 default_settings["silent"] = True
 default_settings["seed"] = args.seed
@@ -127,6 +128,12 @@ default_settings["max_frames"] = args.max_frames
 # set the control value into the default setting
 if control_val != None:
     default_settings[args.feature] = control_val
+else:
+    control_val = default_settings[args.feature]
+print(
+    "==== feature %s, control value: %s, test value: %s ===="
+    % (args.feature, control_val, test_val)
+)
 
 ab_tests_items = {
     "rgb": {},
@@ -148,12 +155,6 @@ if args.enable_physics:
 resolutions = args.resolution
 nprocs_tests = args.num_procs
 
-print(
-    "feature %s, control value: %s, test value: %s" % args.feature,
-    control_val,
-    test_val,
-)
-
 performance_all = {}
 for nprocs in nprocs_tests:
     default_settings["num_processes"] = nprocs
@@ -166,7 +167,7 @@ for nprocs in nprocs_tests:
             print(" ---------------------- %s ------------------------ " % key)
             settings = default_settings.copy()
             settings.update(value)
-            perf[key] = demo_runner.ab_tests(settings, args.feature, test_value)
+            perf[key] = demo_runner.ab_tests(settings, args.feature, test_val)
             print(
                 " ====== FPS (%d x %d, %s): %0.1f ======"
                 % (settings["width"], settings["height"], key, perf[key].get("fps"))

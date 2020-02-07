@@ -9,6 +9,7 @@ import os
 import random
 import time
 from enum import Enum
+from functools import partial
 
 import numpy as np
 from PIL import Image
@@ -40,12 +41,13 @@ class ABTest(Enum):
 
 class DemoRunner:
     def __init__(self, sim_settings, simulator_demo_type):
-        self.set_sim_settings(sim_settings)
-        self.generate_action_sequence()
+        if simulator_demo_type == DemoRunnerType.EXAMPLE:
+            self.update_sim_settings_and_cfg(sim_settings)
         self._demo_type = simulator_demo_type
 
-    def set_sim_settings(self, sim_settings):
-        self._sim_settings = sim_settings.copy()
+    def update_sim_settings_and_cfg(self, settings):
+        self._sim_settings = settings.copy()
+        self._cfg = make_cfg(self._sim_settings)
 
     def save_color_observation(self, obs, total_frames):
         color_obs = obs["color_sensor"]
@@ -334,7 +336,6 @@ class DemoRunner:
             input("Press Enter to continue...")
 
     def init_common(self, agent_start_state=None):
-        self._cfg = make_cfg(self._sim_settings)
         scene_file = self._sim_settings["scene"]
 
         if (
@@ -353,13 +354,11 @@ class DemoRunner:
         random.seed(self._sim_settings["seed"])
         self._sim.seed(self._sim_settings["seed"])
 
-        # initialize the agent at a random start state
-        if agent_start_state == None:
-            start_state = self.init_agent_state(self._sim_settings["default_agent"])
-        else:  # apply the state specified by the user
-            start_state = self.init_agent_state(
-                self._sim_settings["default_agent"], agent_start_state
-            )
+        # initialize the agent state at the user provided value,
+        # otherwise at a random start state
+        start_state = self.init_agent_state(
+            self._sim_settings["default_agent"], agent_start_state
+        )
 
         return start_state
 
@@ -395,13 +394,13 @@ class DemoRunner:
         global _barrier
         _barrier = b
 
-    def run(self, settings, agent_start_state=None):
-        nprocs = settings["num_processes"]
+    def run(self, nprocs, start_state=None):
         barrier = multiprocessing.Barrier(nprocs)
         with multiprocessing.Pool(
             nprocs, initializer=self._pool_init, initargs=(barrier,)
         ) as pool:
-            perfs = pool.map(self._run_target(agent_start_state), range(nprocs))
+            func = partial(self._run_target, agent_start_state=start_state)
+            perfs = pool.map(func, range(nprocs))
         res = {k: [] for k in perfs[0].keys()}
         for p in perfs:
             for k, v in p.items():
@@ -409,7 +408,10 @@ class DemoRunner:
         return res
 
     def benchmark(self, settings):
-        res = self.run(settings)
+        self.update_sim_settings_and_cfg(settings)
+        # generate action sequence
+        self.generate_action_sequence()
+        res = self.run(nprocs=settings["num_processes"])
         return dict(
             frame_time=sum(res["frame_time"]),
             fps=sum(res["fps"]),
@@ -421,20 +423,34 @@ class DemoRunner:
         if not (test_key in settings.keys()):
             raise RuntimeError("The key to be tested is not in the settings.")
 
+        if test_key == "max_frames":
+            raise RuntimeError(
+                "AB test mode: the number of frames cannot be the tested feature."
+            )
+
+        self.update_sim_settings_and_cfg(settings)
+        # generate action sequence
+        self.generate_action_sequence()
+
         # generate agent's start state
         start_state = self.init_common()
         self._sim.close()
         del self._sim
         # first pass: run control group
         self._ab_test_group = ABTest.CONTROL
-        res_control = self.run(settings, start_state)
+        res_control = self.run(
+            nprocs=settings["num_processes"], agent_start_state=start_state
+        )
 
         # change the settings
         settings[test_key] = test_value
+        self.update_sim_settings_and_cfg(settings)
 
         # second pass: run test group
         self._ab_test_group = ABTest.TEST
-        res_test = self.run(settings, start_state)
+        res_test = self.run(
+            nprocs=settings["num_processes"], agent_start_state=start_state
+        )
 
         # process the result
         return dict(
@@ -449,6 +465,9 @@ class DemoRunner:
         )
 
     def example(self):
+        # generate action sequence
+        self.generate_action_sequence()
+
         start_state = self.init_common()
 
         # initialize and compute shortest path to goal
