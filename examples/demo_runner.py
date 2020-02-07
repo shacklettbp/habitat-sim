@@ -30,13 +30,19 @@ _barrier = None
 class DemoRunnerType(Enum):
     BENCHMARK = 1
     EXAMPLE = 2
-    AB_TESTS_CULLING = 3
+    AB_TESTS = 3
+
+
+class ABTest(Enum):
+    CONTROL = 1
+    TEST = 2
 
 
 class DemoRunner:
     def __init__(self, sim_settings, simulator_demo_type):
-        if simulator_demo_type == DemoRunnerType.EXAMPLE:
-            self.set_sim_settings(sim_settings)
+        self.set_sim_settings(sim_settings)
+        self.generate_action_sequence()
+        self._demo_type = simulator_demo_type
 
     def set_sim_settings(self, sim_settings):
         self._sim_settings = sim_settings.copy()
@@ -44,22 +50,37 @@ class DemoRunner:
     def save_color_observation(self, obs, total_frames):
         color_obs = obs["color_sensor"]
         color_img = Image.fromarray(color_obs, mode="RGBA")
-        color_img.save("test.rgba.%05d.png" % total_frames)
+        if self._demo_type != DemoRunnerType.AB_TESTS:
+            color_img.save("test.rgba.%05d.png" % total_frames)
+        else:
+            if self._ab_test_group == ABTest.CONTROL:
+                color_img.save("test.rgba.control_group.%05d.png" % total_frames)
+            else:
+                color_img.save("test.rgba.test_group.%05d.png" % total_frames)
 
     def save_semantic_observation(self, obs, total_frames):
         semantic_obs = obs["semantic_sensor"]
         semantic_img = Image.new("P", (semantic_obs.shape[1], semantic_obs.shape[0]))
         semantic_img.putpalette(d3_40_colors_rgb.flatten())
         semantic_img.putdata((semantic_obs.flatten() % 40).astype(np.uint8))
-        semantic_img.save("test.sem.%05d.png" % total_frames)
+        if self._demo_type != DemoRunnerType.AB_TESTS:
+            semantic_img.save("test.sem.%05d.png" % total_frames)
+        else:
+            if self._ab_test_group == ABTest.CONTROL:
+                semantic_img.save("test.sem.control_group.%05d.png" % total_frames)
+            else:
+                semantic_img.save("test.sem.test_group.%05d.png" % total_frames)
 
     def save_depth_observation(self, obs, total_frames):
-        if self._sim_settings["depth_sensor"]:
-            depth_obs = obs["depth_sensor"]
-            depth_img = Image.fromarray(
-                (depth_obs / 10 * 255).astype(np.uint8), mode="L"
-            )
+        depth_obs = obs["depth_sensor"]
+        depth_img = Image.fromarray((depth_obs / 10 * 255).astype(np.uint8), mode="L")
+        if self._demo_type != DemoRunnerType.AB_TESTS:
             depth_img.save("test.depth.%05d.png" % total_frames)
+        else:
+            if self._ab_test_group == ABTest.CONTROL:
+                depth_img.save("test.depth.control_group.%05d.png" % total_frames)
+            else:
+                depth_img.save("test.depth.test_group.%05d.png" % total_frames)
 
     def output_semantic_mask_stats(self, obs, total_frames):
         semantic_obs = obs["semantic_sensor"]
@@ -73,17 +94,20 @@ class DemoRunner:
             if pixel_ratio > 0.01:
                 print(f"obj_id:{sem_obj.id},category:{cat},pixel_ratio:{pixel_ratio}")
 
-    def init_agent_state(self, agent_id):
-        # initialize the agent at a random start state
-        agent = self._sim.initialize_agent(agent_id)
-        start_state = agent.get_state()
-
-        # force starting position on first floor (try 100 samples)
-        num_start_tries = 0
-        while start_state.position[1] > 0.5 and num_start_tries < 100:
-            start_state.position = self._sim.pathfinder.get_random_navigable_point()
-            num_start_tries += 1
-        agent.set_state(start_state)
+    def init_agent_state(self, agent_id, agent_start_state=None):
+        # initialize the agent at a random start state, if agent_start_state is not provided
+        # otherwise, directly apply the state specified by the user
+        agent = self._sim.initialize_agent(agent_id, agent_start_state)
+        if agent_start_state == None:
+            # force starting position on first floor (try 100 samples)
+            start_state = agent.get_state()
+            num_start_tries = 0
+            while start_state.position[1] > 0.5 and num_start_tries < 100:
+                start_state.position = self._sim.pathfinder.get_random_navigable_point()
+                num_start_tries += 1
+            agent.set_state(start_state)
+        else:
+            start_state = agent_start_state
 
         if not self._sim_settings["silent"]:
             print(
@@ -185,14 +209,27 @@ class DemoRunner:
                 + str(object_init_cell)
             )
 
+    def generate_action_sequence(self):
+        self._action_seq = []
+        total_frames = 0
+        action_names = list(
+            self._cfg.agents[self._sim_settings["default_agent"]].action_space.keys()
+        )
+        while total_frames < self._sim_settings["max_frames"]:
+            self._action_seq.append(random.choice(action_names))
+            total_frames += 1
+
     def do_time_steps(self):
+        if self._action_seq == None or self._action_seq == []:
+            raise RuntimeError("Action sequence is not generated.")
+        elif len(self._action_seq) != self._sim_settings["max_frames"]:
+            raise RuntimeError(
+                "The number of actions does not match the number of frames"
+            )
 
         total_sim_step_time = 0.0
         total_frames = 0
         start_time = time.time()
-        action_names = list(
-            self._cfg.agents[self._sim_settings["default_agent"]].action_space.keys()
-        )
 
         # load an object and position the agent for physics testing
         if self._sim_settings["enable_physics"]:
@@ -206,8 +243,7 @@ class DemoRunner:
         while total_frames < self._sim_settings["max_frames"]:
             if total_frames == 1:
                 start_time = time.time()
-            # XXX
-            action = random.choice(action_names)
+            action = self._action_seq[total_frames]
             if not self._sim_settings["silent"]:
                 print("action", action)
 
@@ -297,7 +333,7 @@ class DemoRunner:
                         )
             input("Press Enter to continue...")
 
-    def init_common(self):
+    def init_common(self, agent_start_state=None):
         self._cfg = make_cfg(self._sim_settings)
         scene_file = self._sim_settings["scene"]
 
@@ -318,12 +354,17 @@ class DemoRunner:
         self._sim.seed(self._sim_settings["seed"])
 
         # initialize the agent at a random start state
-        start_state = self.init_agent_state(self._sim_settings["default_agent"])
+        if agent_start_state == None:
+            start_state = self.init_agent_state(self._sim_settings["default_agent"])
+        else:  # apply the state specified by the user
+            start_state = self.init_agent_state(
+                self._sim_settings["default_agent"], agent_start_state
+            )
 
         return start_state
 
-    def _bench_target(self, _idx=0):
-        self.init_common()
+    def _run_target(self, _idx=0, agent_start_state=None):
+        self.init_common(agent_start_state)
 
         best_perf = None
         for _ in range(3):
@@ -354,26 +395,57 @@ class DemoRunner:
         global _barrier
         _barrier = b
 
-    def benchmark(self, settings):
-        self.set_sim_settings(settings)
+    def run(self, settings, agent_start_state=None):
         nprocs = settings["num_processes"]
-
         barrier = multiprocessing.Barrier(nprocs)
         with multiprocessing.Pool(
             nprocs, initializer=self._pool_init, initargs=(barrier,)
         ) as pool:
-            perfs = pool.map(self._bench_target, range(nprocs))
-
+            perfs = pool.map(self._run_target(agent_start_state), range(nprocs))
         res = {k: [] for k in perfs[0].keys()}
         for p in perfs:
             for k, v in p.items():
                 res[k] += [v]
+        return res
 
+    def benchmark(self, settings):
+        res = self.run(settings)
         return dict(
             frame_time=sum(res["frame_time"]),
             fps=sum(res["fps"]),
             total_time=sum(res["total_time"]) / nprocs,
             avg_sim_step_time=sum(res["avg_sim_step_time"]) / nprocs,
+        )
+
+    def ab_tests(self, settings, test_key, test_value):
+        if not (test_key in settings.keys()):
+            raise RuntimeError("The key to be tested is not in the settings.")
+
+        # generate agent's start state
+        start_state = self.init_common()
+        self._sim.close()
+        del self._sim
+        # first pass: run control group
+        self._ab_test_group = ABTest.CONTROL
+        res_control = self.run(settings, start_state)
+
+        # change the settings
+        settings[test_key] = test_value
+
+        # second pass: run test group
+        self._ab_test_group = ABTest.TEST
+        res_test = self.run(settings, start_state)
+
+        # process the result
+        return dict(
+            frame_time_control=sum(res_control["frame_time"]),
+            fps_control=sum(res_control["fps"]),
+            total_time_control=sum(res_control["total_time"]) / nprocs,
+            avg_sim_step_time_control=sum(res_control["avg_sim_step_time"]) / nprocs,
+            frame_time_test=sum(res_test["frame_time"]),
+            fps_test=sum(res_test["fps"]),
+            total_time_test=sum(res_test["total_time"]) / nprocs,
+            avg_sim_step_time_test=sum(res_test["avg_sim_step_time"]) / nprocs,
         )
 
     def example(self):

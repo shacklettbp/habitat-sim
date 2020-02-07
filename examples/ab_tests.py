@@ -10,7 +10,7 @@ import argparse
 import demo_runner as dr
 import numpy as np
 
-parser = argparse.ArgumentParser("Running AB tests on visibility culling")
+parser = argparse.ArgumentParser("Running AB test on simulator")
 parser.add_argument("--scene", type=str, default=dr.default_sim_settings["test_scene"])
 parser.add_argument(
     "--max_frames",
@@ -33,12 +33,37 @@ parser.add_argument(
     default=[1, 3, 5],
     help="Number of concurrent processes.",
 )
-
-# TODO: --benchmark_semantic_sensor
-# enable this option when we extend the culling on semantic sensor
+parser.add_argument(
+    "--semantic_sensor", action="store_true", help="Whether to enable semantic sensor."
+)
 parser.add_argument("--seed", type=int, default=1)
-
+parser.add_argument(
+    "--enable_physics",
+    action="store_true",
+    help="Whether to enable phyiscs (kinematic by default or dynamics if installed with bullet) during ab tests or not.",
+)
+parser.add_argument(
+    "--num_objects",
+    type=int,
+    default=10,
+    help="Number of objects to spawn if enable_physics is true.",
+)
+parser.add_argument(
+    "--test_object_index",
+    type=int,
+    default=0,
+    help="Index the objects to spawn if enable_physics is true. -1 indicates random.",
+)
+parser.add_argument(
+    "--feature",
+    type=str,
+    required=True,
+    help="the feature that is to be tested. (it must be defined as a boolean first in default_sim_settings",
+)
 args = parser.parse_args()
+
+if not (args.feature in default_settings.keys()):
+    raise RuntimeError("Feature to be tested is not defined in default_sim_settings.")
 
 default_settings = dr.default_sim_settings.copy()
 default_settings["scene"] = args.scene
@@ -52,14 +77,23 @@ default_settings["compute_shortest_path"] = False
 default_settings["compute_action_shortest_path"] = False
 
 default_settings["max_frames"] = args.max_frames
-default_settings["frustum_culling"] = not args.disable_frustum_culling
 
-
-benchmark_items = {
+ab_tests_items = {
     "rgb": {},
     "rgbd": {"depth_sensor": True},
     "depth_only": {"color_sensor": False, "depth_sensor": True},
 }
+if args.semantic_sensor:
+    ab_tests_items["semantic_only"] = {"color_sensor": False, "semantic_sensor": True}
+    ab_tests_items["rgbd_semantic"] = {"depth_sensor": True, "semantic_sensor": True}
+
+if args.enable_physics:
+    # TODO: cannot test physics with no sensors as this won't create a renderer or load the scene.
+    # ab_tests_items["enable_physics_no_obs"] = {"color_sensor": False, "enable_physics": True}
+    ab_tests_items["phys_rgb"] = {"enable_physics": True}
+    ab_tests_items["phys_rgbd"] = {"depth_sensor": True, "enable_physics": True}
+    default_settings["num_objects"] = args.num_objects
+    default_settings["test_object_index"] = args.test_object_index
 
 resolutions = args.resolution
 nprocs_tests = args.num_procs
@@ -71,8 +105,8 @@ for nprocs in nprocs_tests:
     for resolution in resolutions:
         default_settings["width"] = default_settings["height"] = resolution
         perf = {}
-        for key, value in benchmark_items.items():
-            demo_runner = dr.DemoRunner(default_settings, dr.DemoRunnerType.BENCHMARK)
+        for key, value in ab_tests_items.items():
+            demo_runner = dr.DemoRunner(default_settings, dr.DemoRunnerType.AB_TESTS)
             print(" ---------------------- %s ------------------------ " % key)
             settings = default_settings.copy()
             settings.update(value)
