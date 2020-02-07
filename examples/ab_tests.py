@@ -110,7 +110,8 @@ for nprocs in nprocs_tests:
             print(" ---------------------- %s ------------------------ " % key)
             settings = default_settings.copy()
             settings.update(value)
-            perf[key] = demo_runner.benchmark(settings)
+            test_value = not settings[args.feature]
+            perf[key] = demo_runner.ab_tests(settings, args.feature, test_value)
             print(
                 " ====== FPS (%d x %d, %s): %0.1f ======"
                 % (settings["width"], settings["height"], key, perf[key].get("fps"))
