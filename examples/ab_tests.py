@@ -10,7 +10,9 @@ import argparse
 import demo_runner as dr
 import numpy as np
 
-parser = argparse.ArgumentParser("Running AB test on simulator")
+parser = argparse.ArgumentParser(
+    description="Running AB test on simulator", add_help=True
+)
 parser.add_argument("--scene", type=str, default=dr.default_sim_settings["test_scene"])
 parser.add_argument(
     "--max_frames",
@@ -58,9 +60,53 @@ parser.add_argument(
     "--feature",
     type=str,
     required=True,
-    help="the feature that is to be tested. (it must be defined as a boolean first in default_sim_settings",
+    help="the feature that is to be tested. (it must be defined in default_sim_settings",
 )
+
+group = parser.add_mutually_exclusive_group(required=True)
+group.add_argument(
+    "-i", "--integer", action="store_true", help="the feature type is integer."
+)
+group.add_argument(
+    "-f", "--float", action="store_true", help="the feature type is float."
+)
+group.add_argument(
+    "-b", "--boolean", action="store_true", help="the feature type is boolean."
+)
+group.add_argument(
+    "-s", "--string", action="store_true", help="the feature type is string."
+)
+
+parser.add_argument(
+    "--control_value",
+    type=str,
+    default=argparse.SUPPRESS,
+    help="the feature value in control group (default: default value in default_settings)",
+)
+
+parser.add_argument(
+    "--test_value", type=str, required=True, help="the feature value in test group"
+)
+
 args = parser.parse_args()
+
+control_val = None
+if args.integer:
+    test_val = int(args.test_value)
+    if "control_value" in args:
+        control_val = int(args.control_value)
+elif args.float:
+    test_val = float(args.test_value)
+    if "control_value" in args:
+        control_val = float(args.control_value)
+elif args.boolean:
+    test_val = bool(args.test_value)
+    if "control_value" in args:
+        control_val = bool(args.control_value)
+elif args.string:
+    test_val = args.test_value
+    if "control_value" in args:
+        control_val = args.control_value
 
 if not (args.feature in default_settings.keys()):
     raise RuntimeError("Feature to be tested is not defined in default_sim_settings.")
@@ -77,6 +123,10 @@ default_settings["compute_shortest_path"] = False
 default_settings["compute_action_shortest_path"] = False
 
 default_settings["max_frames"] = args.max_frames
+
+# set the control value into the default setting
+if control_val != None:
+    default_settings[args.feature] = control_val
 
 ab_tests_items = {
     "rgb": {},
@@ -98,6 +148,12 @@ if args.enable_physics:
 resolutions = args.resolution
 nprocs_tests = args.num_procs
 
+print(
+    "feature %s, control value: %s, test value: %s" % args.feature,
+    control_val,
+    test_val,
+)
+
 performance_all = {}
 for nprocs in nprocs_tests:
     default_settings["num_processes"] = nprocs
@@ -110,7 +166,6 @@ for nprocs in nprocs_tests:
             print(" ---------------------- %s ------------------------ " % key)
             settings = default_settings.copy()
             settings.update(value)
-            test_value = not settings[args.feature]
             perf[key] = demo_runner.ab_tests(settings, args.feature, test_value)
             print(
                 " ====== FPS (%d x %d, %s): %0.1f ======"
