@@ -4,6 +4,8 @@
 
 #include <stdlib.h>
 #include <chrono>
+#include <vector>
+#include <fstream>
 
 #include <Magnum/configure.h>
 #include <Magnum/SceneGraph/Camera.h>
@@ -57,6 +59,9 @@
 #include "helper_cuda.h"
 
 #include "stb_image_write.h"
+#include <pthread.h>
+#include <atomic>
+#include <thread>
 
 using namespace Magnum;
 using namespace Math::Literals;
@@ -427,36 +432,98 @@ State makeState(const std::string &scenepath)
     };
 }
 
-constexpr int num_frames = 1;
+constexpr size_t max_load_frames = 10000;
+constexpr size_t max_render_frames = 10000;
+constexpr int num_threads = 2;
+constexpr bool debug = false;
+
+std::vector<Matrix4> readViews(const char *dump_path)
+{
+    using namespace std;
+    ifstream dump_file(dump_path, ios::binary);
+
+    vector<Matrix4> views;
+
+    for (size_t i = 0; i < max_load_frames; i++) {
+        float raw[16];
+        dump_file.read((char *)raw, sizeof(float)*16);
+        views.emplace_back(
+                Matrix4(Vector4(raw[0], raw[1], raw[2], raw[3]),
+                        Vector4(raw[4], raw[5], raw[6], raw[7]),
+                        Vector4(raw[8], raw[9], raw[10], raw[11]),
+                        Vector4(raw[12], raw[13], raw[14], raw[15])));
+    }
+
+    return views;
+}
 
 int main(int argc, char *argv[])
 {
     using namespace std;
-    if (argc < 2) {
-        std::cout << "scene please" << std::endl;
+    if (argc < 3) {
+        std::cout << "SCENE VIEWS" << std::endl;
         return -1;
     }
-    std::string file(argv[1]);
 
-    State state = makeState(file);
+    vector<Matrix4> init_views = readViews(argv[2]);
+    size_t num_frames = min(init_views.size(), max_render_frames);
 
-    Matrix4 view(Vector4(-1.19209e-07, 0, 1, 0), Vector4(0, 1, 0, 0), Vector4(-1, 0, -1.19209e-07, 0), Vector4(-3.38921, 1.62114, -3.34509, 1));
+    pthread_barrier_t start_barrier;
+    pthread_barrier_init(&start_barrier, nullptr, num_threads + 1);
+    pthread_barrier_t end_barrier;
+    pthread_barrier_init(&end_barrier, nullptr, num_threads + 1);
+
+    vector<thread> threads;
+    threads.reserve(num_threads);
+
+    atomic_bool go(false);
+
+    for (int t_idx = 0; t_idx < num_threads; t_idx++) {
+        threads.emplace_back(
+            [num_frames, &go, &start_barrier, &end_barrier]
+            (const char *scene_path, vector<Matrix4> views)
+            {
+                State state = makeState(scene_path);
+
+                random_device rd;
+                mt19937 g(rd());
+                shuffle(views.begin(), views.end(), g);
+
+                pthread_barrier_wait(&start_barrier);
+                while (!go.load()) {}
+
+                for (size_t i = 0; i < num_frames; i++) {
+                    const Matrix4 &mat = views[i];
+                    state.draw(mat);
+                }
+
+                pthread_barrier_wait(&end_barrier);
+            }, 
+            argv[1], init_views);
+    }
+
+    pthread_barrier_wait(&start_barrier);
+    if (debug) {
+        rdoc.startFrame();
+    }
 
     auto start = chrono::steady_clock::now();
+    go.store(true);
 
-    rdoc.startFrame();
-    for (int i = 0; i < num_frames; i++) {
-        state.draw(view);
-    }
-    rdoc.endFrame();
-
+    pthread_barrier_wait(&end_barrier);
     auto end = chrono::steady_clock::now();
-    
+
+    if (debug) {
+        rdoc.endFrame();
+    }
+
     auto diff = chrono::duration_cast<chrono::milliseconds>(end - start);
 
-    cout << "FPS: " << ((double)num_frames / (double)diff.count()) * 1000.0 << endl;
+    cout << "FPS: " << ((double)num_frames * num_threads / (double)diff.count()) * 1000.0 << endl;
 
-    save_frames(state);
+    for (thread &t : threads) {
+        t.join();
+    }
 
     return 0;
 }
