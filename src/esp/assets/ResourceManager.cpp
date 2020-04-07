@@ -870,20 +870,18 @@ Magnum::GL::AbstractShaderProgram* ResourceManager::getShaderProgram(
       case COLORED_SHADER: {
         shaderPrograms_[COLORED_SHADER] =
             std::make_shared<Magnum::Shaders::Flat3D>(
-                Magnum::Shaders::Flat3D::Flag::ObjectId);
+                );
       } break;
 
       case VERTEX_COLORED_SHADER: {
         shaderPrograms_[VERTEX_COLORED_SHADER] =
             std::make_shared<Magnum::Shaders::Flat3D>(
-                Magnum::Shaders::Flat3D::Flag::ObjectId |
                 Magnum::Shaders::Flat3D::Flag::VertexColor);
       } break;
 
       case TEXTURED_SHADER: {
         shaderPrograms_[TEXTURED_SHADER] =
             std::make_shared<Magnum::Shaders::Flat3D>(
-                Magnum::Shaders::Flat3D::Flag::ObjectId |
                 Magnum::Shaders::Flat3D::Flag::Textured);
       } break;
 

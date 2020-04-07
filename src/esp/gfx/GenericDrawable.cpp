@@ -39,7 +39,6 @@ void GenericDrawable::draw(const Magnum::Matrix4& transformationMatrix,
     shader.setColor(color_);
   }
 
-  shader.setObjectId(node_.getId());
   mesh_.draw(shader_);
 }
 
