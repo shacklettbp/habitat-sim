@@ -434,7 +434,7 @@ State makeState(const std::string &scenepath)
 
 constexpr size_t max_load_frames = 10000;
 constexpr size_t max_render_frames = 10000;
-constexpr int num_threads = 2;
+constexpr int num_threads = 4;
 constexpr bool debug = false;
 
 std::vector<Matrix4> readViews(const char *dump_path)
